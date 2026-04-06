@@ -35,6 +35,7 @@ connector in Claude.ai and manage your tasks conversationally.
 | `get_filter` | Get a saved filter by ID |
 | `update_filter` | Update a saved filter |
 | `delete_filter` | Delete a saved filter |
+| `get_calendar_events` | Events from configured .ics files and webcal feeds, grouped by day |
 
 ## Quick start
 
@@ -68,6 +69,8 @@ walkthrough on Uberspace.
 | `VIKUNJA_TOKEN` | Yes | API token from Vikunja Settings > API Tokens |
 | `MCP_AUTH_TOKEN` | Recommended | Shared secret for the `/mcp` endpoint — see [Auth](#auth) |
 | `PORT` | No | Port to listen on (default: `3000`) |
+| `CALENDAR_ICS_FILES` | No | Comma-separated paths to local `.ics` files |
+| `CALENDAR_ICS_URLS` | No | Comma-separated webcal/https iCal subscription URLs |
 
 ## Auth
 
@@ -90,7 +93,35 @@ https://your-server.example.com/mcp?token=<your-token>
 If `MCP_AUTH_TOKEN` is left unset the endpoint is open to anyone who can reach
 it — only do this on a private, firewalled network.
 
-## Calendar feed
+## Calendar integration
+
+The `get_calendar_events` tool reads events from any number of `.ics` sources
+and returns them grouped by day. When configured, `weekly_review` also shows a
+`THIS WEEK'S CALENDAR` section so your schedule and task backlog are reviewed
+together.
+
+**Posteo users:** your webcal subscription URL is under Calendar Settings →
+iCal subscription. Add it to `CALENDAR_ICS_URLS` — no sync daemon needed.
+
+```bash
+export CALENDAR_ICS_URLS=webcal://posteo.de/calendars/you/personal
+```
+
+For multiple calendars, separate with commas:
+
+```bash
+export CALENDAR_ICS_URLS=webcal://posteo.de/calendars/you/personal,webcal://posteo.de/calendars/you/work
+```
+
+For local `.ics` files (e.g. synced from CalDAV via vdirsyncer):
+
+```bash
+export CALENDAR_ICS_FILES=/home/user/calendars/shifts.ics,/home/user/calendars/personal.ics
+```
+
+Both vars are optional. Calendar features are silently disabled when neither is set.
+
+## Vikunja task calendar feed
 
 The server exposes a machine-readable iCal feed you can subscribe to in any
 calendar app:

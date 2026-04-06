@@ -16,6 +16,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import { VikunjaClient, VikunjaTask, VikunjaProject, VikunjaSavedFilter, VikunjaNotification } from "./vikunja.js";
+import { loadCalendars, hasCalendars, CalendarEvent } from "./calendar.js";
 
 // ── Config ─────────────────────────────────────────────────────────────
 
@@ -108,6 +109,57 @@ function formatNotification(n: VikunjaNotification): string {
   return `#${n.id} [${read}] ${n.name} (${n.created})`;
 }
 
+function formatEventTime(event: CalendarEvent): string {
+  if (event.isAllDay) return "All day";
+  const fmt = (d: Date) =>
+    d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  return `${fmt(event.start)}–${fmt(event.end)}`;
+}
+
+function formatCalendarEvent(event: CalendarEvent): string {
+  const parts = [
+    `  ${formatEventTime(event)}  ${event.summary}`,
+    event.location ? `    📍 ${event.location}` : "",
+  ];
+  return parts.filter(Boolean).join("\n");
+}
+
+/** Group events by date and render as a day-by-day agenda. */
+function formatCalendarAgenda(sources: Awaited<ReturnType<typeof loadCalendars>>): string {
+  const byDay = new Map<string, { label: string; lines: string[] }>();
+
+  for (const source of sources) {
+    if (source.error) {
+      const key = "error";
+      if (!byDay.has(key)) byDay.set(key, { label: "⚠️ Errors", lines: [] });
+      byDay.get(key)!.lines.push(`  Failed to load "${source.calendarName}": ${source.error}`);
+      continue;
+    }
+    for (const event of source.events) {
+      const dateKey = event.start.toISOString().slice(0, 10);
+      if (!byDay.has(dateKey)) {
+        const label = event.start.toLocaleDateString("en-GB", {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+        });
+        byDay.set(dateKey, { label, lines: [] });
+      }
+      byDay.get(dateKey)!.lines.push(
+        `  [${source.calendarName}] ${formatEventTime(event)}  ${event.summary}` +
+        (event.location ? `  📍 ${event.location}` : "")
+      );
+    }
+  }
+
+  if (byDay.size === 0) return "  No events in this range.";
+
+  return [...byDay.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, { label, lines }]) => `${label}:\n${lines.join("\n")}`)
+    .join("\n\n");
+}
+
 // ── iCal helpers ──────────────────────────────────────────────────────
 
 /** Convert ISO 8601 timestamp to iCal UTC format: 20260410T090000Z */
@@ -193,7 +245,7 @@ function generateICal(tasks: VikunjaTask[]): string {
 function createServer(): McpServer {
   const server = new McpServer({
     name: "vikunja",
-    version: "1.1.0",
+    version: "1.2.0",
   });
 
   // ── list_projects ──────────────────────────────────────────────────
@@ -568,6 +620,57 @@ Sort options: id, title, done, done_at, due_date, created, updated, priority, po
     }
   );
 
+  // ── get_calendar_events ────────────────────────────────────────────
+
+  server.tool(
+    "get_calendar_events",
+    `Get events from all configured calendars (local .ics files and webcal subscriptions) within a date window.
+
+Returns events grouped by day across all sources. Useful for checking your schedule, finding free time, or seeing what's coming up.
+
+Configure sources via environment variables:
+  CALENDAR_ICS_FILES – comma-separated paths to local .ics files
+  CALENDAR_ICS_URLS  – comma-separated webcal/https URLs`,
+    {
+      days_back: z
+        .number()
+        .min(0)
+        .max(365)
+        .optional()
+        .describe("Days in the past to include (default 0)"),
+      days_ahead: z
+        .number()
+        .min(1)
+        .max(365)
+        .optional()
+        .describe("Days ahead to include (default 14)"),
+    },
+    async ({ days_back = 0, days_ahead = 14 }) => {
+      if (!hasCalendars()) {
+        return {
+          content: [{
+            type: "text",
+            text: "No calendars configured. Set CALENDAR_ICS_FILES and/or CALENDAR_ICS_URLS in the server environment.",
+          }],
+        };
+      }
+      const from = new Date();
+      from.setDate(from.getDate() - days_back);
+      from.setHours(0, 0, 0, 0);
+      const to = new Date();
+      to.setDate(to.getDate() + days_ahead);
+      to.setHours(23, 59, 59, 999);
+
+      const sources = await loadCalendars(from, to);
+      const totalEvents = sources.reduce((n, s) => n + s.events.length, 0);
+
+      const header = `📅 Calendar — ${days_back > 0 ? `last ${days_back}d + ` : ""}next ${days_ahead} day(s) · ${totalEvents} event(s) across ${sources.length} calendar(s)\n`;
+      return {
+        content: [{ type: "text", text: header + "\n" + formatCalendarAgenda(sources) }],
+      };
+    }
+  );
+
   // ── weekly_review ──────────────────────────────────────────────────
 
   server.tool(
@@ -609,17 +712,31 @@ Sort options: id, title, done, done_at, due_date, created, updated, priority, po
       const highPriority = resolve(highPriorityR);
       const recentlyDone = resolve(recentlyDoneR);
 
+      // Calendar events for the week (optional — gracefully absent if not configured)
+      let calendarSection = "";
+      if (hasCalendars()) {
+        const now = new Date();
+        const weekEnd = new Date();
+        weekEnd.setDate(weekEnd.getDate() + 7);
+        weekEnd.setHours(23, 59, 59, 999);
+        const calSources = await loadCalendars(now, weekEnd).catch(() => []);
+        const totalCalEvents = calSources.reduce((n, s) => n + s.events.length, 0);
+        calendarSection = `\n📅 THIS WEEK'S CALENDAR (${totalCalEvents}):\n` +
+          formatCalendarAgenda(calSources);
+      }
+
       const sections: string[] = [];
 
       sections.push(`── WEEKLY REVIEW ──\n`);
+      if (calendarSection) sections.push(calendarSection);
 
-      sections.push(`🔴 OVERDUE (${overdue.length}):`);
+      sections.push(`\n🔴 OVERDUE (${overdue.length}):`);
       sections.push(
         queryErr(overdueR) ??
         (overdue.length ? overdue.map(formatTask).join("\n\n") : "  None – you're all caught up!")
       );
 
-      sections.push(`\n📅 DUE THIS WEEK (${dueThisWeek.length}):`);
+      sections.push(`\n📅 TASKS DUE THIS WEEK (${dueThisWeek.length}):`);
       sections.push(
         queryErr(dueThisWeekR) ??
         (dueThisWeek.length ? dueThisWeek.map(formatTask).join("\n\n") : "  Nothing due this week.")
@@ -944,7 +1061,7 @@ app.use("/mcp", (req, res, next) => {
 
 // Health check
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", server: "vikunja-mcp", version: "1.1.0" });
+  res.json({ status: "ok", server: "vikunja-mcp", version: "1.2.0" });
 });
 
 // Stateless Streamable HTTP: each POST creates a fresh server + transport

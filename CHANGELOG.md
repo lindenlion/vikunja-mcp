@@ -2,6 +2,23 @@
 
 All notable changes to vikunja-mcp are documented here.
 
+## [1.2.0] — Unreleased
+
+### Added
+- **`get_calendar_events` tool** — reads events from any number of local
+  `.ics` files and remote webcal/https URLs. Events are expanded (including
+  recurring rules), grouped by day, and returned with calendar name, time,
+  and location. Configurable look-back and look-ahead window.
+- **`weekly_review` calendar section** — when calendar sources are
+  configured, the weekly review now opens with a `THIS WEEK'S CALENDAR`
+  section so tasks and schedule are reviewed together in one call.
+- **`CALENDAR_ICS_FILES` env var** — comma-separated paths to local `.ics`
+  files (e.g. synced from CalDAV via vdirsyncer).
+- **`CALENDAR_ICS_URLS` env var** — comma-separated webcal/https URLs for
+  remote iCal subscriptions. `webcal://` is automatically converted to
+  `https://`. Both vars are optional; calendar features are silently
+  disabled when neither is set.
+
 ## [1.1.0] — 2026-04-06
 
 ### Added
