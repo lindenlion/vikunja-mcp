@@ -202,7 +202,7 @@ export class VikunjaClient {
     if (opts?.order_by) query.order_by = opts.order_by;
     if (opts?.filter) query.filter = opts.filter;
     if (opts?.s) query.s = opts.s;
-    return this.request<VikunjaTask[]>("GET", "/tasks/all", undefined, query);
+    return this.request<VikunjaTask[]>("GET", "/tasks", undefined, query);
   }
 
   async getTask(id: number): Promise<VikunjaTask> {

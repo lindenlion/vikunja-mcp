@@ -85,7 +85,7 @@ export class VikunjaClient {
             query.filter = opts.filter;
         if (opts?.s)
             query.s = opts.s;
-        return this.request("GET", "/tasks/all", undefined, query);
+        return this.request("GET", "/tasks", undefined, query);
     }
     async getTask(id) {
         return this.request("GET", `/tasks/${id}`);
