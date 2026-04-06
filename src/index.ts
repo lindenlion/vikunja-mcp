@@ -15,7 +15,7 @@ import express, { Request, Response } from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { VikunjaClient, VikunjaTask, VikunjaProject } from "./vikunja.js";
+import { VikunjaClient, VikunjaTask, VikunjaProject, VikunjaSavedFilter, VikunjaNotification } from "./vikunja.js";
 
 // ── Config ─────────────────────────────────────────────────────────────
 
@@ -88,6 +88,24 @@ function formatProject(p: VikunjaProject): string {
     p.is_favorite ? `  ⭐ Favorite` : "",
   ];
   return parts.filter(Boolean).join("\n");
+}
+
+function formatFilter(f: VikunjaSavedFilter): string {
+  const fc = f.filters;
+  const parts = [
+    `#${f.id} ${f.title}`,
+    f.description ? `  Description: ${f.description}` : "",
+    f.is_favorite ? `  ⭐ Favorite` : "",
+    fc?.filter ? `  Filter: ${fc.filter}` : "",
+    fc?.s ? `  Search: ${fc.s}` : "",
+    fc?.sort_by?.length ? `  Sort: ${fc.sort_by.join(", ")}` : "",
+  ];
+  return parts.filter(Boolean).join("\n");
+}
+
+function formatNotification(n: VikunjaNotification): string {
+  const read = isValidDate(n.read_at) ? `read ${n.read_at}` : "unread";
+  return `#${n.id} [${read}] ${n.name} (${n.created})`;
 }
 
 // ── iCal helpers ──────────────────────────────────────────────────────
@@ -620,6 +638,139 @@ Sort options: id, title, done, done_at, due_date, created, updated, priority, po
       );
 
       return { content: [{ type: "text", text: sections.join("\n") }] };
+    }
+  );
+
+  // ── bulk_update_tasks ─────────────────────────────────────────────
+
+  server.tool(
+    "bulk_update_tasks",
+    `Update multiple tasks at once. Only the fields you specify are changed — other fields are left untouched.
+
+Examples:
+  Mark tasks #1, #2, #3 as done: task_ids=[1,2,3], done=true
+  Set all FIIERCE sprint tasks to high priority: task_ids=[...], priority=3`,
+    {
+      task_ids: z.array(z.number()).describe("Array of task IDs to update"),
+      title: z.string().optional().describe("New title"),
+      description: z.string().optional().describe("New description"),
+      done: z.boolean().optional().describe("Mark as done or not done"),
+      priority: z.number().min(0).max(5).optional().describe("Priority: 0-5"),
+      due_date: z.string().nullable().optional().describe("Due date (ISO 8601) or null to clear"),
+      start_date: z.string().nullable().optional().describe("Start date or null"),
+      end_date: z.string().nullable().optional().describe("End date or null"),
+      percent_done: z.number().min(0).max(1).optional().describe("Progress 0.0–1.0"),
+      is_favorite: z.boolean().optional().describe("Toggle favorite"),
+    },
+    async ({ task_ids, ...rest }) => {
+      const values: Record<string, unknown> = {};
+      const fields: string[] = [];
+      for (const [k, v] of Object.entries(rest)) {
+        if (v !== undefined) {
+          values[k] = v;
+          fields.push(k);
+        }
+      }
+      const tasks = await vikunja.bulkUpdateTasks(task_ids, values, fields);
+      return {
+        content: [{
+          type: "text",
+          text: `Updated ${tasks.length} task(s):\n\n${tasks.map(formatTask).join("\n\n")}`,
+        }],
+      };
+    }
+  );
+
+  // ── get_notifications ─────────────────────────────────────────────
+
+  server.tool(
+    "get_notifications",
+    "Get all notifications for the current user. Useful for seeing what has changed recently — new comments, task assignments, etc.",
+    {},
+    async () => {
+      const notifications = await vikunja.listNotifications();
+      if (!notifications.length) {
+        return { content: [{ type: "text", text: "No notifications." }] };
+      }
+      const unread = notifications.filter((n) => !isValidDate(n.read_at));
+      const text = [
+        `${notifications.length} notification(s), ${unread.length} unread:\n`,
+        ...notifications.map(formatNotification),
+      ].join("\n");
+      return { content: [{ type: "text", text }] };
+    }
+  );
+
+  // ── create_filter ─────────────────────────────────────────────────
+
+  server.tool(
+    "create_filter",
+    "Save a named filter for reuse. Saved filters appear alongside projects in Vikunja. Use the same filter expression syntax as list_tasks.",
+    {
+      title: z.string().describe("Filter name"),
+      description: z.string().optional().describe("Filter description"),
+      filter: z.string().optional().describe("Filter expression, e.g. 'priority >= 3 && done = false'"),
+      sort_by: z.string().optional().describe("Field to sort by"),
+      order_by: z.enum(["asc", "desc"]).optional().describe("Sort direction"),
+      is_favorite: z.boolean().optional().describe("Show in favorites"),
+    },
+    async ({ title, description, filter, sort_by, order_by, is_favorite }) => {
+      const saved = await vikunja.createFilter({
+        title,
+        description,
+        is_favorite,
+        filters: { filter, sort_by, order_by },
+      });
+      return { content: [{ type: "text", text: `Created filter:\n${formatFilter(saved)}` }] };
+    }
+  );
+
+  // ── get_filter ────────────────────────────────────────────────────
+
+  server.tool(
+    "get_filter",
+    "Get a saved filter by ID.",
+    { filter_id: z.number().describe("The filter ID") },
+    async ({ filter_id }) => {
+      const saved = await vikunja.getFilter(filter_id);
+      return { content: [{ type: "text", text: formatFilter(saved) }] };
+    }
+  );
+
+  // ── update_filter ─────────────────────────────────────────────────
+
+  server.tool(
+    "update_filter",
+    "Update a saved filter's title, description, expression, or favorite status.",
+    {
+      filter_id: z.number().describe("The filter ID to update"),
+      title: z.string().optional().describe("New title"),
+      description: z.string().optional().describe("New description"),
+      filter: z.string().optional().describe("New filter expression"),
+      sort_by: z.string().optional().describe("New sort field"),
+      order_by: z.enum(["asc", "desc"]).optional().describe("New sort direction"),
+      is_favorite: z.boolean().optional().describe("Toggle favorite"),
+    },
+    async ({ filter_id, filter, sort_by, order_by, ...rest }) => {
+      const saved = await vikunja.updateFilter(filter_id, {
+        ...rest,
+        ...(filter !== undefined || sort_by !== undefined || order_by !== undefined
+          ? { filters: { filter, sort_by, order_by } }
+          : {}),
+      });
+      return { content: [{ type: "text", text: `Updated filter:\n${formatFilter(saved)}` }] };
+    }
+  );
+
+  // ── delete_filter ─────────────────────────────────────────────────
+
+  server.tool(
+    "delete_filter",
+    "Permanently delete a saved filter.",
+    { filter_id: z.number().describe("The filter ID to delete") },
+    async ({ filter_id }) => {
+      await vikunja.deleteFilter(filter_id);
+      return { content: [{ type: "text", text: `Deleted filter #${filter_id}.` }] };
     }
   );
 

@@ -147,7 +147,39 @@ export class VikunjaClient {
         return this.request("PUT", `/tasks/${taskId}/relations`, { other_task_id: otherTaskId, relation_kind: relationKind });
     }
     async deleteRelation(taskId, otherTaskId, relationKind) {
-        await this.request("DELETE", `/tasks/${taskId}/relations`, { other_task_id: otherTaskId, relation_kind: relationKind });
+        await this.request("DELETE", `/tasks/${taskId}/relations/${relationKind}/${otherTaskId}`);
+    }
+    // ── Bulk tasks ─────────────────────────────────────────────────────
+    async bulkUpdateTasks(taskIds, values, fields) {
+        return this.request("POST", "/tasks/bulk", {
+            task_ids: taskIds,
+            values,
+            ...(fields?.length ? { fields } : {}),
+        });
+    }
+    // ── Notifications ──────────────────────────────────────────────────
+    async listNotifications() {
+        return this.request("GET", "/notifications");
+    }
+    // ── Saved filters ──────────────────────────────────────────────────
+    async createFilter(data) {
+        return this.request("PUT", "/filters", data);
+    }
+    async getFilter(id) {
+        return this.request("GET", `/filters/${id}`);
+    }
+    async updateFilter(id, data) {
+        const current = await this.getFilter(id);
+        return this.request("POST", `/filters/${id}`, {
+            title: current.title,
+            description: current.description,
+            is_favorite: current.is_favorite,
+            filters: current.filters,
+            ...data,
+        });
+    }
+    async deleteFilter(id) {
+        await this.request("DELETE", `/filters/${id}`);
     }
     // ── Views ──────────────────────────────────────────────────────────
     async listViews(projectId) {

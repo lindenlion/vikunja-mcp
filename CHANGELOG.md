@@ -2,9 +2,15 @@
 
 All notable changes to vikunja-mcp are documented here.
 
-## [Unreleased]
+## [1.1.0] — 2026-04-06
 
 ### Added
+- **`bulk_update_tasks` tool** — update any number of tasks in one call.
+  Only specified fields are changed; unmentioned fields are left untouched.
+- **`get_notifications` tool** — list all notifications with unread count.
+- **`create_filter` / `get_filter` / `update_filter` / `delete_filter` tools**
+  — full CRUD for saved filters. Saved filters appear alongside projects in
+  Vikunja and can be used to recall named task views.
 - **Token-based auth middleware** — the `/mcp` endpoint now checks for an
   optional `MCP_AUTH_TOKEN` env var. When set, every request must supply the
   token as a query parameter (`?token=…`) or the server returns `401
@@ -21,6 +27,18 @@ All notable changes to vikunja-mcp are documented here.
   two tasks.
 
 ### Fixed
+- `remove_relation` was calling `DELETE /tasks/{id}/relations` with a request
+  body — corrected to `DELETE /tasks/{id}/relations/{relationKind}/{otherTaskId}`
+  as the API spec requires.
+- `list_tasks` / `weekly_review` were targeting `GET /tasks/all` which does not
+  exist in Vikunja v2; corrected to `GET /tasks`.
+- `update_task` and `update_project` now fetch the current object before
+  sending a partial update, preventing Vikunja's full-object replacement from
+  zeroing out fields the caller did not mention (e.g. `complete_task` wiping
+  `due_date` and `priority`).
+- `weekly_review` was silently swallowing API errors via `.catch(() => [])`,
+  making it appear to succeed with empty results. Now uses `Promise.allSettled`
+  and surfaces per-section error messages.
 - Date fields (`due_date`, `start_date`, `end_date`) no longer show
   Vikunja's zero-value sentinel `0001-01-01T00:00:00Z` as a real date.
 

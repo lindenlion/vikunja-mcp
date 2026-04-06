@@ -74,6 +74,31 @@ export interface VikunjaComment {
   updated: string;
 }
 
+export interface VikunjaSavedFilter {
+  id: number;
+  title: string;
+  description: string;
+  is_favorite: boolean;
+  filters: {
+    filter?: string;
+    filter_include_nulls?: boolean;
+    sort_by?: string[];
+    order_by?: string[];
+    s?: string;
+  };
+  owner: VikunjaUser;
+  created: string;
+  updated: string;
+}
+
+export interface VikunjaNotification {
+  id: number;
+  name: string;
+  notification: unknown;
+  read_at: string | null;
+  created: string;
+}
+
 export interface VikunjaView {
   id: number;
   title: string;
@@ -344,9 +369,86 @@ export class VikunjaClient {
   ): Promise<void> {
     await this.request<void>(
       "DELETE",
-      `/tasks/${taskId}/relations`,
-      { other_task_id: otherTaskId, relation_kind: relationKind }
+      `/tasks/${taskId}/relations/${relationKind}/${otherTaskId}`
     );
+  }
+
+  // ── Bulk tasks ─────────────────────────────────────────────────────
+
+  async bulkUpdateTasks(
+    taskIds: number[],
+    values: Partial<{
+      title: string;
+      description: string;
+      done: boolean;
+      priority: number;
+      due_date: string | null;
+      start_date: string | null;
+      end_date: string | null;
+      percent_done: number;
+      is_favorite: boolean;
+    }>,
+    fields?: string[]
+  ): Promise<VikunjaTask[]> {
+    return this.request<VikunjaTask[]>("POST", "/tasks/bulk", {
+      task_ids: taskIds,
+      values,
+      ...(fields?.length ? { fields } : {}),
+    });
+  }
+
+  // ── Notifications ──────────────────────────────────────────────────
+
+  async listNotifications(): Promise<VikunjaNotification[]> {
+    return this.request<VikunjaNotification[]>("GET", "/notifications");
+  }
+
+  // ── Saved filters ──────────────────────────────────────────────────
+
+  async createFilter(data: {
+    title: string;
+    description?: string;
+    is_favorite?: boolean;
+    filters?: {
+      filter?: string;
+      sort_by?: string;
+      order_by?: string;
+      s?: string;
+    };
+  }): Promise<VikunjaSavedFilter> {
+    return this.request<VikunjaSavedFilter>("PUT", "/filters", data);
+  }
+
+  async getFilter(id: number): Promise<VikunjaSavedFilter> {
+    return this.request<VikunjaSavedFilter>("GET", `/filters/${id}`);
+  }
+
+  async updateFilter(
+    id: number,
+    data: Partial<{
+      title: string;
+      description: string;
+      is_favorite: boolean;
+      filters: {
+        filter?: string;
+        sort_by?: string;
+        order_by?: string;
+        s?: string;
+      };
+    }>
+  ): Promise<VikunjaSavedFilter> {
+    const current = await this.getFilter(id);
+    return this.request<VikunjaSavedFilter>("POST", `/filters/${id}`, {
+      title: current.title,
+      description: current.description,
+      is_favorite: current.is_favorite,
+      filters: current.filters,
+      ...data,
+    });
+  }
+
+  async deleteFilter(id: number): Promise<void> {
+    await this.request<void>("DELETE", `/filters/${id}`);
   }
 
   // ── Views ──────────────────────────────────────────────────────────

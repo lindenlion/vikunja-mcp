@@ -66,6 +66,29 @@ export interface VikunjaComment {
     created: string;
     updated: string;
 }
+export interface VikunjaSavedFilter {
+    id: number;
+    title: string;
+    description: string;
+    is_favorite: boolean;
+    filters: {
+        filter?: string;
+        filter_include_nulls?: boolean;
+        sort_by?: string[];
+        order_by?: string[];
+        s?: string;
+    };
+    owner: VikunjaUser;
+    created: string;
+    updated: string;
+}
+export interface VikunjaNotification {
+    id: number;
+    name: string;
+    notification: unknown;
+    read_at: string | null;
+    created: string;
+}
 export interface VikunjaView {
     id: number;
     title: string;
@@ -145,5 +168,41 @@ export declare class VikunjaClient {
     createComment(taskId: number, comment: string): Promise<VikunjaComment>;
     createRelation(taskId: number, otherTaskId: number, relationKind: string): Promise<unknown>;
     deleteRelation(taskId: number, otherTaskId: number, relationKind: string): Promise<void>;
+    bulkUpdateTasks(taskIds: number[], values: Partial<{
+        title: string;
+        description: string;
+        done: boolean;
+        priority: number;
+        due_date: string | null;
+        start_date: string | null;
+        end_date: string | null;
+        percent_done: number;
+        is_favorite: boolean;
+    }>, fields?: string[]): Promise<VikunjaTask[]>;
+    listNotifications(): Promise<VikunjaNotification[]>;
+    createFilter(data: {
+        title: string;
+        description?: string;
+        is_favorite?: boolean;
+        filters?: {
+            filter?: string;
+            sort_by?: string;
+            order_by?: string;
+            s?: string;
+        };
+    }): Promise<VikunjaSavedFilter>;
+    getFilter(id: number): Promise<VikunjaSavedFilter>;
+    updateFilter(id: number, data: Partial<{
+        title: string;
+        description: string;
+        is_favorite: boolean;
+        filters: {
+            filter?: string;
+            sort_by?: string;
+            order_by?: string;
+            s?: string;
+        };
+    }>): Promise<VikunjaSavedFilter>;
+    deleteFilter(id: number): Promise<void>;
     listViews(projectId: number): Promise<VikunjaView[]>;
 }
