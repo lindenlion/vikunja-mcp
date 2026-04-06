@@ -29,6 +29,12 @@ connector in Claude.ai and manage your tasks conversationally.
 | `get_calendar` | Agenda view of tasks with due dates (overdue + upcoming) |
 | `create_relation` | Link two tasks (subtask, blocking, precedes, related, …) |
 | `remove_relation` | Remove a relation between two tasks |
+| `bulk_update_tasks` | Update multiple tasks at once (priority, status, dates, …) |
+| `get_notifications` | Get all notifications with unread count |
+| `create_filter` | Save a named filter for reuse |
+| `get_filter` | Get a saved filter by ID |
+| `update_filter` | Update a saved filter |
+| `delete_filter` | Delete a saved filter |
 
 ## Quick start
 

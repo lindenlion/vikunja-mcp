@@ -193,7 +193,7 @@ function generateICal(tasks: VikunjaTask[]): string {
 function createServer(): McpServer {
   const server = new McpServer({
     name: "vikunja",
-    version: "1.0.0",
+    version: "1.1.0",
   });
 
   // ── list_projects ──────────────────────────────────────────────────
@@ -944,7 +944,7 @@ app.use("/mcp", (req, res, next) => {
 
 // Health check
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", server: "vikunja-mcp", version: "1.0.0" });
+  res.json({ status: "ok", server: "vikunja-mcp", version: "1.1.0" });
 });
 
 // Stateless Streamable HTTP: each POST creates a fresh server + transport
