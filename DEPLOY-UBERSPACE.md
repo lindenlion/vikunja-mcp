@@ -41,13 +41,25 @@ cp .env.example .env
 nano .env
 ```
 
-Set your real `VIKUNJA_TOKEN` (create one in Vikunja under Settings > API Tokens)
-and choose an unused port. Check which ports are free:
+Set your real values and choose an unused port. Check which ports are free:
 
 ```bash
 # Pick a port between 1024–65535 that isn't in use
 ss -tlnp | grep LISTEN
 ```
+
+**`VIKUNJA_TOKEN`** — create one in Vikunja under Settings > API Tokens with
+read/write access to tasks, projects, and labels.
+
+**`MCP_AUTH_TOKEN`** — a shared secret that protects the `/mcp` endpoint from
+unauthorized access. Generate a strong value:
+
+```bash
+openssl rand -hex 32
+```
+
+Paste the output into `.env` as `MCP_AUTH_TOKEN`. Keep it secret — anyone with
+this token can use your Vikunja account through the MCP server.
 
 ## 4. Test it manually
 
@@ -61,6 +73,10 @@ In another terminal:
 ```bash
 curl http://localhost:9090/health
 # Should return: {"status":"ok","server":"vikunja-mcp","version":"1.0.0"}
+
+# Optional: test the iCal feed
+curl -s http://localhost:9090/calendar.ics | head -5
+# Should start with: BEGIN:VCALENDAR
 ```
 
 Press Ctrl+C to stop.
@@ -127,12 +143,26 @@ Uberspace handles the TLS certificate automatically via Let's Encrypt.
 
 1. Go to **Settings > Connectors** in Claude.ai
 2. Click **"Add custom connector"**
-3. Enter the URL: `https://mcp.vikunja.lindenlion.net/mcp`
+3. Enter the URL — append your `MCP_AUTH_TOKEN` as a query parameter:
+   ```
+   https://mcp.vikunja.lindenlion.net/mcp?token=your-long-random-token-here
+   ```
 4. Name it something like "Vikunja"
 5. Click **Add**
 
 The connector should now appear in your conversation toggles.
 Enable it in a chat and try: _"Show me my overdue tasks in Vikunja"_
+
+### Optional: subscribe to the iCal calendar feed
+
+In any calendar app that supports webcal subscriptions (macOS Calendar, Thunderbird, etc.):
+
+```
+webcal://mcp.vikunja.lindenlion.net/calendar.ics
+```
+
+This feed includes all open tasks and tasks completed in the last 30 days that
+have a date set. Your calendar app will poll it automatically.
 
 ## Updating
 

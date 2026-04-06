@@ -1,0 +1,46 @@
+# Changelog
+
+All notable changes to vikunja-mcp are documented here.
+
+## [Unreleased]
+
+### Added
+- **Token-based auth middleware** — the `/mcp` endpoint now checks for an
+  optional `MCP_AUTH_TOKEN` env var. When set, every request must supply the
+  token as a query parameter (`?token=…`) or the server returns `401
+  Unauthorized`. Leave unset to disable auth (e.g. on a private network).
+- **`get_calendar` tool** — agenda view of tasks with due dates, grouped by
+  overdue / upcoming. Configurable look-ahead window (1–365 days) and optional
+  overdue inclusion.
+- **`GET /calendar.ics` endpoint** — RFC 5545-compliant iCal feed of all open
+  tasks (plus tasks completed in the last 30 days). Subscribe with any calendar
+  app via `webcal://<host>/calendar.ics`.
+- **`create_relation` tool** — link two tasks with a typed relation
+  (subtask, blocking, precedes, related, …).
+- **`remove_relation` tool** — remove a previously created relation between
+  two tasks.
+
+### Fixed
+- Date fields (`due_date`, `start_date`, `end_date`) no longer show
+  Vikunja's zero-value sentinel `0001-01-01T00:00:00Z` as a real date.
+
+### Changed
+- TypeScript dev-dependency bumped from `^5.7.0` to `^5.9.3`.
+
+## [1.0.0] — 2026-04-06
+
+Initial release.
+
+### Added
+- MCP server over Streamable HTTP (stateless, no sessions).
+- **Project tools:** `list_projects`, `get_project`, `create_project`,
+  `update_project`, `delete_project`.
+- **Task tools:** `list_tasks`, `get_task`, `create_task`, `update_task`,
+  `delete_task`, `complete_task`, `reopen_task`.
+- **Comment tool:** `add_comment`.
+- **Label tools:** `list_labels`, `create_label`, `add_label_to_task`,
+  `remove_label_from_task`.
+- **Review tool:** `weekly_review` — overdue, due this week, high-priority
+  open, and recently completed tasks in one call.
+- `GET /health` endpoint for process monitoring.
+- Supervisord + Uberspace deployment guide (`DEPLOY-UBERSPACE.md`).

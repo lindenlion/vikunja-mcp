@@ -11,7 +11,7 @@
  *   PORT            – Port to listen on (default 3000)
  */
 
-import express from "express";
+import express, { Request, Response } from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
@@ -22,6 +22,10 @@ import { VikunjaClient, VikunjaTask, VikunjaProject } from "./vikunja.js";
 const VIKUNJA_URL = process.env.VIKUNJA_URL;
 const VIKUNJA_TOKEN = process.env.VIKUNJA_TOKEN;
 const PORT = parseInt(process.env.PORT || "3000", 10);
+
+// Auth middleware — reject requests to this MCP without a valid token
+const AUTH_TOKEN = process.env.MCP_AUTH_TOKEN;
+
 
 if (!VIKUNJA_URL || !VIKUNJA_TOKEN) {
   console.error(
@@ -50,15 +54,20 @@ function priorityLabel(p: number): string {
   return map[p] ?? String(p);
 }
 
+/** Vikunja returns "0001-01-01T00:00:00Z" for unset dates instead of null */
+function isValidDate(date: string | null | undefined): date is string {
+  return !!date && !date.startsWith("0001-");
+}
+
 function formatTask(t: VikunjaTask): string {
   const parts = [
     `#${t.id} ${t.done ? "✅" : "⬜"} ${t.title}`,
     t.identifier ? `  Identifier: ${t.identifier}` : "",
     `  Project: ${t.project_id}`,
     `  Priority: ${priorityLabel(t.priority)}`,
-    t.due_date ? `  Due: ${t.due_date}` : "",
-    t.start_date ? `  Start: ${t.start_date}` : "",
-    t.end_date ? `  End: ${t.end_date}` : "",
+    isValidDate(t.due_date) ? `  Due: ${t.due_date}` : "",
+    isValidDate(t.start_date) ? `  Start: ${t.start_date}` : "",
+    isValidDate(t.end_date) ? `  End: ${t.end_date}` : "",
     t.percent_done > 0 ? `  Progress: ${Math.round(t.percent_done * 100)}%` : "",
     t.labels?.length ? `  Labels: ${t.labels.map((l) => l.title).join(", ")}` : "",
     t.assignees?.length
@@ -79,6 +88,86 @@ function formatProject(p: VikunjaProject): string {
     p.is_favorite ? `  ⭐ Favorite` : "",
   ];
   return parts.filter(Boolean).join("\n");
+}
+
+// ── iCal helpers ──────────────────────────────────────────────────────
+
+/** Convert ISO 8601 timestamp to iCal UTC format: 20260410T090000Z */
+function formatICalDate(isoDate: string): string {
+  return new Date(isoDate).toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d+/, "")
+    .slice(0, 15) + "Z";
+}
+
+function escapeICal(text: string): string {
+  return text
+    .replace(/\\/g, "\\\\")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,")
+    .replace(/\r\n|\r|\n/g, "\\n");
+}
+
+/** RFC 5545 §3.1: fold lines longer than 75 octets */
+function foldICal(line: string): string {
+  const result: string[] = [];
+  while (line.length > 75) {
+    result.push(line.slice(0, 75));
+    line = " " + line.slice(75);
+  }
+  result.push(line);
+  return result.join("\r\n");
+}
+
+function generateICal(tasks: VikunjaTask[]): string {
+  const stamp = formatICalDate(new Date().toISOString());
+  const lines: string[] = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//vikunja-mcp//Vikunja MCP Calendar//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    "X-WR-CALNAME:Vikunja Tasks",
+  ];
+
+  for (const task of tasks) {
+    // Use start_date, fall back to due_date; skip tasks with no usable date
+    const dtstart = isValidDate(task.start_date)
+      ? task.start_date
+      : isValidDate(task.due_date)
+      ? task.due_date
+      : null;
+    const dtend = isValidDate(task.end_date)
+      ? task.end_date
+      : isValidDate(task.due_date)
+      ? task.due_date
+      : dtstart;
+
+    if (!dtstart || !dtend) continue;
+
+    lines.push("BEGIN:VEVENT");
+    lines.push(`UID:vikunja-task-${task.id}@vikunja-mcp`);
+    lines.push(`DTSTAMP:${stamp}`);
+    lines.push(`DTSTART:${formatICalDate(dtstart)}`);
+    lines.push(`DTEND:${formatICalDate(dtend)}`);
+    lines.push(`SUMMARY:${escapeICal(task.title)}`);
+    if (task.description) {
+      lines.push(`DESCRIPTION:${escapeICal(task.description.slice(0, 500))}`);
+    }
+    lines.push(`STATUS:${task.done ? "COMPLETED" : "NEEDS-ACTION"}`);
+    if (task.priority > 0) {
+      // Map Vikunja priority 1–5 to iCal priority 9–1 (lower number = higher priority)
+      const icalPri = [9, 9, 5, 5, 1, 1][task.priority] ?? 5;
+      lines.push(`PRIORITY:${icalPri}`);
+    }
+    if (task.done && isValidDate(task.done_at)) {
+      lines.push(`COMPLETED:${formatICalDate(task.done_at)}`);
+    }
+    lines.push("END:VEVENT");
+  }
+
+  lines.push("END:VCALENDAR");
+  return lines.map(foldICal).join("\r\n");
 }
 
 // ── MCP Server factory ────────────────────────────────────────────────
@@ -536,6 +625,69 @@ Sort options: id, title, done, done_at, due_date, created, updated, priority, po
     }
   );
 
+  // ── get_calendar ──────────────────────────────────────────────────
+
+  server.tool(
+    "get_calendar",
+    `Get an agenda view of tasks that have due dates. Shows overdue and upcoming tasks grouped by urgency.
+
+The server also exposes a machine-readable iCal feed at GET /calendar.ics that can be subscribed to by calendar apps.`,
+    {
+      days: z
+        .number()
+        .min(1)
+        .max(365)
+        .optional()
+        .describe("Days ahead to look (default 30)"),
+      include_overdue: z
+        .boolean()
+        .optional()
+        .describe("Include overdue tasks (default true)"),
+    },
+    async ({ days = 30, include_overdue = true }) => {
+      const [upcoming, overdue] = await Promise.all([
+        vikunja
+          .listAllTasks({
+            filter: `due_date > now && due_date < now+${days}d && done = false`,
+            sort_by: "due_date",
+            order_by: "asc",
+            per_page: 200,
+          })
+          .catch(() => []),
+        include_overdue
+          ? vikunja
+              .listAllTasks({
+                filter: "due_date < now && done = false",
+                sort_by: "due_date",
+                order_by: "asc",
+                per_page: 100,
+              })
+              .catch(() => [])
+          : Promise.resolve([] as VikunjaTask[]),
+      ]);
+
+      const sections: string[] = [
+        `📅 Calendar Agenda — next ${days} day(s)\n`,
+      ];
+
+      if (overdue.length > 0) {
+        sections.push(`🔴 OVERDUE (${overdue.length}):`);
+        sections.push(overdue.map(formatTask).join("\n\n"));
+      }
+
+      if (upcoming.length > 0) {
+        sections.push(`\n📆 UPCOMING (${upcoming.length}):`);
+        sections.push(upcoming.map(formatTask).join("\n\n"));
+      }
+
+      if (overdue.length === 0 && upcoming.length === 0) {
+        sections.push("No tasks with due dates found in this range.");
+      }
+
+      return { content: [{ type: "text", text: sections.join("\n") }] };
+    }
+  );
+
   // ── create_relation ─────────────────────────────────────────────
 
   server.tool(
@@ -633,6 +785,14 @@ Example: to make task #2 a subtask of task #1, call with task_id=1, other_task_i
 const app = express();
 app.use(express.json());
 
+app.use("/mcp", (req, res, next) => {
+  if (AUTH_TOKEN && req.query.token !== AUTH_TOKEN) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+  next();
+});
+
 // Health check
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", server: "vikunja-mcp", version: "1.0.0" });
@@ -662,6 +822,36 @@ app.get("/mcp", (_req, res) => {
 
 app.delete("/mcp", (_req, res) => {
   res.status(405).json({ error: "Method not allowed. Stateless server has no sessions to delete." });
+});
+
+// iCal calendar feed – subscribe to this URL in any calendar app
+// e.g. webcal://<host>/calendar.ics
+app.get("/calendar.ics", async (_req: Request, res: Response) => {
+  try {
+    const [openTasks, doneTasks] = await Promise.all([
+      vikunja
+        .listAllTasks({ filter: "done = false", per_page: 500 })
+        .catch(() => []),
+      vikunja
+        .listAllTasks({
+          filter: "done = true && done_at > now-30d",
+          sort_by: "done_at",
+          order_by: "desc",
+          per_page: 100,
+        })
+        .catch(() => []),
+    ]);
+
+    const ical = generateICal([...openTasks, ...doneTasks]);
+    res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="vikunja.ics"');
+    res.send(ical);
+  } catch (err) {
+    console.error("Calendar feed error:", err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Failed to generate calendar feed" });
+    }
+  }
 });
 
 app.listen(PORT, "0.0.0.0", () => {
