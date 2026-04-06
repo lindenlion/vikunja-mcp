@@ -19,6 +19,8 @@ import { VikunjaClient } from "./vikunja.js";
 const VIKUNJA_URL = process.env.VIKUNJA_URL;
 const VIKUNJA_TOKEN = process.env.VIKUNJA_TOKEN;
 const PORT = parseInt(process.env.PORT || "3000", 10);
+// Auth middleware — reject requests to this MCP without a valid token
+const AUTH_TOKEN = process.env.MCP_AUTH_TOKEN;
 if (!VIKUNJA_URL || !VIKUNJA_TOKEN) {
     console.error("Error: VIKUNJA_URL and VIKUNJA_TOKEN environment variables are required.");
     console.error("  VIKUNJA_URL   = https://vikunja.lindenlion.net");
@@ -401,54 +403,48 @@ Sort options: id, title, done, done_at, due_date, created, updated, priority, po
     });
     // ── weekly_review ──────────────────────────────────────────────────
     server.tool("weekly_review", "Generate a weekly review summary: overdue tasks, tasks due this week, high-priority open tasks, and recently completed tasks.", {}, async () => {
-        const [overdue, dueThisWeek, highPriority, recentlyDone] = await Promise.all([
-            vikunja
-                .listAllTasks({
+        const [overdueR, dueThisWeekR, highPriorityR, recentlyDoneR] = await Promise.allSettled([
+            vikunja.listAllTasks({
                 filter: "due_date < now && done = false",
                 sort_by: "due_date",
                 order_by: "asc",
-            })
-                .catch(() => []),
-            vikunja
-                .listAllTasks({
+            }),
+            vikunja.listAllTasks({
                 filter: "due_date > now && due_date < now+7d && done = false",
                 sort_by: "due_date",
                 order_by: "asc",
-            })
-                .catch(() => []),
-            vikunja
-                .listAllTasks({
+            }),
+            vikunja.listAllTasks({
                 filter: "priority >= 3 && done = false",
                 sort_by: "priority",
                 order_by: "desc",
-            })
-                .catch(() => []),
-            vikunja
-                .listAllTasks({
+            }),
+            vikunja.listAllTasks({
                 filter: "done = true && done_at > now-7d",
                 sort_by: "done_at",
                 order_by: "desc",
-            })
-                .catch(() => []),
+            }),
         ]);
+        const resolve = (r) => r.status === "fulfilled" ? r.value : [];
+        const queryErr = (r) => r.status === "rejected" ? `  ⚠️ Query failed: ${r.reason}` : null;
+        const overdue = resolve(overdueR);
+        const dueThisWeek = resolve(dueThisWeekR);
+        const highPriority = resolve(highPriorityR);
+        const recentlyDone = resolve(recentlyDoneR);
         const sections = [];
         sections.push(`── WEEKLY REVIEW ──\n`);
         sections.push(`🔴 OVERDUE (${overdue.length}):`);
-        sections.push(overdue.length
-            ? overdue.map(formatTask).join("\n\n")
-            : "  None – you're all caught up!");
+        sections.push(queryErr(overdueR) ??
+            (overdue.length ? overdue.map(formatTask).join("\n\n") : "  None – you're all caught up!"));
         sections.push(`\n📅 DUE THIS WEEK (${dueThisWeek.length}):`);
-        sections.push(dueThisWeek.length
-            ? dueThisWeek.map(formatTask).join("\n\n")
-            : "  Nothing due this week.");
+        sections.push(queryErr(dueThisWeekR) ??
+            (dueThisWeek.length ? dueThisWeek.map(formatTask).join("\n\n") : "  Nothing due this week."));
         sections.push(`\n🔥 HIGH PRIORITY OPEN (${highPriority.length}):`);
-        sections.push(highPriority.length
-            ? highPriority.map(formatTask).join("\n\n")
-            : "  No high-priority tasks.");
+        sections.push(queryErr(highPriorityR) ??
+            (highPriority.length ? highPriority.map(formatTask).join("\n\n") : "  No high-priority tasks."));
         sections.push(`\n✅ COMPLETED THIS WEEK (${recentlyDone.length}):`);
-        sections.push(recentlyDone.length
-            ? recentlyDone.map(formatTask).join("\n\n")
-            : "  Nothing completed yet this week.");
+        sections.push(queryErr(recentlyDoneR) ??
+            (recentlyDone.length ? recentlyDone.map(formatTask).join("\n\n") : "  Nothing completed yet this week."));
         return { content: [{ type: "text", text: sections.join("\n") }] };
     });
     // ── get_calendar ──────────────────────────────────────────────────
@@ -582,6 +578,13 @@ Example: to make task #2 a subtask of task #1, call with task_id=1, other_task_i
 // ── HTTP Server ────────────────────────────────────────────────────────
 const app = express();
 app.use(express.json());
+app.use("/mcp", (req, res, next) => {
+    if (AUTH_TOKEN && req.query.token !== AUTH_TOKEN) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+    }
+    next();
+});
 // Health check
 app.get("/health", (_req, res) => {
     res.json({ status: "ok", server: "vikunja-mcp", version: "1.0.0" });

@@ -53,7 +53,19 @@ export class VikunjaClient {
         return this.request("PUT", "/projects", data);
     }
     async updateProject(id, data) {
-        return this.request("POST", `/projects/${id}`, data);
+        // Vikunja replaces the full object on POST — fetch first so we don't
+        // zero out fields the caller didn't mention (e.g. title when only
+        // updating hex_color).
+        const current = await this.getProject(id);
+        return this.request("POST", `/projects/${id}`, {
+            title: current.title,
+            description: current.description,
+            is_archived: current.is_archived,
+            hex_color: current.hex_color,
+            position: current.position,
+            parent_project_id: current.parent_project_id,
+            ...data,
+        });
     }
     async deleteProject(id) {
         await this.request("DELETE", `/projects/${id}`);
@@ -82,7 +94,24 @@ export class VikunjaClient {
         return this.request("PUT", `/projects/${projectId}/tasks`, data);
     }
     async updateTask(id, data) {
-        return this.request("POST", `/tasks/${id}`, data);
+        // Vikunja replaces the full object on POST — fetch first so fields not
+        // mentioned by the caller (e.g. due_date when only toggling done) are
+        // preserved rather than zeroed out.
+        const current = await this.getTask(id);
+        return this.request("POST", `/tasks/${id}`, {
+            title: current.title,
+            description: current.description,
+            done: current.done,
+            priority: current.priority,
+            due_date: current.due_date,
+            start_date: current.start_date,
+            end_date: current.end_date,
+            percent_done: current.percent_done,
+            is_favorite: current.is_favorite,
+            position: current.position,
+            repeat_after: current.repeat_after,
+            ...data,
+        });
     }
     async deleteTask(id) {
         await this.request("DELETE", `/tasks/${id}`);

@@ -557,37 +557,39 @@ Sort options: id, title, done, done_at, due_date, created, updated, priority, po
     "Generate a weekly review summary: overdue tasks, tasks due this week, high-priority open tasks, and recently completed tasks.",
     {},
     async () => {
-      const [overdue, dueThisWeek, highPriority, recentlyDone] =
-        await Promise.all([
-          vikunja
-            .listAllTasks({
-              filter: "due_date < now && done = false",
-              sort_by: "due_date",
-              order_by: "asc",
-            })
-            .catch(() => []),
-          vikunja
-            .listAllTasks({
-              filter: "due_date > now && due_date < now+7d && done = false",
-              sort_by: "due_date",
-              order_by: "asc",
-            })
-            .catch(() => []),
-          vikunja
-            .listAllTasks({
-              filter: "priority >= 3 && done = false",
-              sort_by: "priority",
-              order_by: "desc",
-            })
-            .catch(() => []),
-          vikunja
-            .listAllTasks({
-              filter: "done = true && done_at > now-7d",
-              sort_by: "done_at",
-              order_by: "desc",
-            })
-            .catch(() => []),
+      const [overdueR, dueThisWeekR, highPriorityR, recentlyDoneR] =
+        await Promise.allSettled([
+          vikunja.listAllTasks({
+            filter: "due_date < now && done = false",
+            sort_by: "due_date",
+            order_by: "asc",
+          }),
+          vikunja.listAllTasks({
+            filter: "due_date > now && due_date < now+7d && done = false",
+            sort_by: "due_date",
+            order_by: "asc",
+          }),
+          vikunja.listAllTasks({
+            filter: "priority >= 3 && done = false",
+            sort_by: "priority",
+            order_by: "desc",
+          }),
+          vikunja.listAllTasks({
+            filter: "done = true && done_at > now-7d",
+            sort_by: "done_at",
+            order_by: "desc",
+          }),
         ]);
+
+      const resolve = (r: PromiseSettledResult<VikunjaTask[]>) =>
+        r.status === "fulfilled" ? r.value : [];
+      const queryErr = (r: PromiseSettledResult<VikunjaTask[]>) =>
+        r.status === "rejected" ? `  ⚠️ Query failed: ${r.reason}` : null;
+
+      const overdue = resolve(overdueR);
+      const dueThisWeek = resolve(dueThisWeekR);
+      const highPriority = resolve(highPriorityR);
+      const recentlyDone = resolve(recentlyDoneR);
 
       const sections: string[] = [];
 
@@ -595,30 +597,26 @@ Sort options: id, title, done, done_at, due_date, created, updated, priority, po
 
       sections.push(`🔴 OVERDUE (${overdue.length}):`);
       sections.push(
-        overdue.length
-          ? overdue.map(formatTask).join("\n\n")
-          : "  None – you're all caught up!"
+        queryErr(overdueR) ??
+        (overdue.length ? overdue.map(formatTask).join("\n\n") : "  None – you're all caught up!")
       );
 
       sections.push(`\n📅 DUE THIS WEEK (${dueThisWeek.length}):`);
       sections.push(
-        dueThisWeek.length
-          ? dueThisWeek.map(formatTask).join("\n\n")
-          : "  Nothing due this week."
+        queryErr(dueThisWeekR) ??
+        (dueThisWeek.length ? dueThisWeek.map(formatTask).join("\n\n") : "  Nothing due this week.")
       );
 
       sections.push(`\n🔥 HIGH PRIORITY OPEN (${highPriority.length}):`);
       sections.push(
-        highPriority.length
-          ? highPriority.map(formatTask).join("\n\n")
-          : "  No high-priority tasks."
+        queryErr(highPriorityR) ??
+        (highPriority.length ? highPriority.map(formatTask).join("\n\n") : "  No high-priority tasks.")
       );
 
       sections.push(`\n✅ COMPLETED THIS WEEK (${recentlyDone.length}):`);
       sections.push(
-        recentlyDone.length
-          ? recentlyDone.map(formatTask).join("\n\n")
-          : "  Nothing completed yet this week."
+        queryErr(recentlyDoneR) ??
+        (recentlyDone.length ? recentlyDone.map(formatTask).join("\n\n") : "  Nothing completed yet this week.")
       );
 
       return { content: [{ type: "text", text: sections.join("\n") }] };
