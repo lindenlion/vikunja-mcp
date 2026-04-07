@@ -121,19 +121,6 @@ export CALENDAR_ICS_FILES=/home/user/calendars/shifts.ics,/home/user/calendars/p
 
 Both vars are optional. Calendar features are silently disabled when neither is set.
 
-## Vikunja task calendar feed
-
-The server exposes a machine-readable iCal feed you can subscribe to in any
-calendar app:
-
-```
-webcal://your-server.example.com/calendar.ics
-```
-
-It includes all open tasks and tasks completed in the last 30 days that have a
-start date, due date, or end date. Subscribe once and your calendar app will
-poll it automatically.
-
 ## Architecture
 
 - **Transport:** Streamable HTTP (stateless) — the current MCP standard

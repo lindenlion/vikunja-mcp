@@ -11,7 +11,8 @@
  *   PORT            – Port to listen on (default 3000)
  */
 
-import express, { Request, Response } from "express";
+import express from "express";
+import { timingSafeEqual } from "crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
@@ -116,13 +117,6 @@ function formatEventTime(event: CalendarEvent): string {
   return `${fmt(event.start)}–${fmt(event.end)}`;
 }
 
-function formatCalendarEvent(event: CalendarEvent): string {
-  const parts = [
-    `  ${formatEventTime(event)}  ${event.summary}`,
-    event.location ? `    📍 ${event.location}` : "",
-  ];
-  return parts.filter(Boolean).join("\n");
-}
 
 /** Group events by date and render as a day-by-day agenda. */
 function formatCalendarAgenda(sources: Awaited<ReturnType<typeof loadCalendars>>): string {
@@ -160,85 +154,6 @@ function formatCalendarAgenda(sources: Awaited<ReturnType<typeof loadCalendars>>
     .join("\n\n");
 }
 
-// ── iCal helpers ──────────────────────────────────────────────────────
-
-/** Convert ISO 8601 timestamp to iCal UTC format: 20260410T090000Z */
-function formatICalDate(isoDate: string): string {
-  return new Date(isoDate).toISOString()
-    .replace(/[-:]/g, "")
-    .replace(/\.\d+/, "")
-    .slice(0, 15) + "Z";
-}
-
-function escapeICal(text: string): string {
-  return text
-    .replace(/\\/g, "\\\\")
-    .replace(/;/g, "\\;")
-    .replace(/,/g, "\\,")
-    .replace(/\r\n|\r|\n/g, "\\n");
-}
-
-/** RFC 5545 §3.1: fold lines longer than 75 octets */
-function foldICal(line: string): string {
-  const result: string[] = [];
-  while (line.length > 75) {
-    result.push(line.slice(0, 75));
-    line = " " + line.slice(75);
-  }
-  result.push(line);
-  return result.join("\r\n");
-}
-
-function generateICal(tasks: VikunjaTask[]): string {
-  const stamp = formatICalDate(new Date().toISOString());
-  const lines: string[] = [
-    "BEGIN:VCALENDAR",
-    "VERSION:2.0",
-    "PRODID:-//vikunja-mcp//Vikunja MCP Calendar//EN",
-    "CALSCALE:GREGORIAN",
-    "METHOD:PUBLISH",
-    "X-WR-CALNAME:Vikunja Tasks",
-  ];
-
-  for (const task of tasks) {
-    // Use start_date, fall back to due_date; skip tasks with no usable date
-    const dtstart = isValidDate(task.start_date)
-      ? task.start_date
-      : isValidDate(task.due_date)
-      ? task.due_date
-      : null;
-    const dtend = isValidDate(task.end_date)
-      ? task.end_date
-      : isValidDate(task.due_date)
-      ? task.due_date
-      : dtstart;
-
-    if (!dtstart || !dtend) continue;
-
-    lines.push("BEGIN:VEVENT");
-    lines.push(`UID:vikunja-task-${task.id}@vikunja-mcp`);
-    lines.push(`DTSTAMP:${stamp}`);
-    lines.push(`DTSTART:${formatICalDate(dtstart)}`);
-    lines.push(`DTEND:${formatICalDate(dtend)}`);
-    lines.push(`SUMMARY:${escapeICal(task.title)}`);
-    if (task.description) {
-      lines.push(`DESCRIPTION:${escapeICal(task.description.slice(0, 500))}`);
-    }
-    lines.push(`STATUS:${task.done ? "COMPLETED" : "NEEDS-ACTION"}`);
-    if (task.priority > 0) {
-      // Map Vikunja priority 1–5 to iCal priority 9–1 (lower number = higher priority)
-      const icalPri = [9, 9, 5, 5, 1, 1][task.priority] ?? 5;
-      lines.push(`PRIORITY:${icalPri}`);
-    }
-    if (task.done && isValidDate(task.done_at)) {
-      lines.push(`COMPLETED:${formatICalDate(task.done_at)}`);
-    }
-    lines.push("END:VEVENT");
-  }
-
-  lines.push("END:VCALENDAR");
-  return lines.map(foldICal).join("\r\n");
-}
 
 // ── MCP Server factory ────────────────────────────────────────────────
 
@@ -349,6 +264,7 @@ Sort options: id, title, done, done_at, due_date, created, updated, priority, po
     {
       filter: z
         .string()
+        .max(500)
         .optional()
         .describe("Vikunja filter expression, e.g. 'done = false && priority >= 3'"),
       search: z.string().optional().describe("Full-text search query"),
@@ -826,7 +742,7 @@ Examples:
     {
       title: z.string().describe("Filter name"),
       description: z.string().optional().describe("Filter description"),
-      filter: z.string().optional().describe("Filter expression, e.g. 'priority >= 3 && done = false'"),
+      filter: z.string().max(500).optional().describe("Filter expression, e.g. 'priority >= 3 && done = false'"),
       sort_by: z.string().optional().describe("Field to sort by"),
       order_by: z.enum(["asc", "desc"]).optional().describe("Sort direction"),
       is_favorite: z.boolean().optional().describe("Show in favorites"),
@@ -863,7 +779,7 @@ Examples:
       filter_id: z.number().describe("The filter ID to update"),
       title: z.string().optional().describe("New title"),
       description: z.string().optional().describe("New description"),
-      filter: z.string().optional().describe("New filter expression"),
+      filter: z.string().max(500).optional().describe("New filter expression"),
       sort_by: z.string().optional().describe("New sort field"),
       order_by: z.enum(["asc", "desc"]).optional().describe("New sort direction"),
       is_favorite: z.boolean().optional().describe("Toggle favorite"),
@@ -895,9 +811,7 @@ Examples:
 
   server.tool(
     "get_calendar",
-    `Get an agenda view of tasks that have due dates. Shows overdue and upcoming tasks grouped by urgency.
-
-The server also exposes a machine-readable iCal feed at GET /calendar.ics that can be subscribed to by calendar apps.`,
+    `Get an agenda view of tasks that have due dates. Shows overdue and upcoming tasks grouped by urgency.`,
     {
       days: z
         .number()
@@ -1052,9 +966,15 @@ const app = express();
 app.use(express.json());
 
 app.use("/mcp", (req, res, next) => {
-  if (AUTH_TOKEN && req.query.token !== AUTH_TOKEN) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
+  if (AUTH_TOKEN) {
+    const provided = String(req.query.token ?? "");
+    const valid =
+      provided.length === AUTH_TOKEN.length &&
+      timingSafeEqual(Buffer.from(provided), Buffer.from(AUTH_TOKEN));
+    if (!valid) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
   }
   next();
 });
@@ -1090,35 +1010,6 @@ app.delete("/mcp", (_req, res) => {
   res.status(405).json({ error: "Method not allowed. Stateless server has no sessions to delete." });
 });
 
-// iCal calendar feed – subscribe to this URL in any calendar app
-// e.g. webcal://<host>/calendar.ics
-app.get("/calendar.ics", async (_req: Request, res: Response) => {
-  try {
-    const [openTasks, doneTasks] = await Promise.all([
-      vikunja
-        .listAllTasks({ filter: "done = false", per_page: 500 })
-        .catch(() => []),
-      vikunja
-        .listAllTasks({
-          filter: "done = true && done_at > now-30d",
-          sort_by: "done_at",
-          order_by: "desc",
-          per_page: 100,
-        })
-        .catch(() => []),
-    ]);
-
-    const ical = generateICal([...openTasks, ...doneTasks]);
-    res.setHeader("Content-Type", "text/calendar; charset=utf-8");
-    res.setHeader("Content-Disposition", 'attachment; filename="vikunja.ics"');
-    res.send(ical);
-  } catch (err) {
-    console.error("Calendar feed error:", err);
-    if (!res.headersSent) {
-      res.status(500).json({ error: "Failed to generate calendar feed" });
-    }
-  }
-});
 
 app.listen(PORT, "0.0.0.0", () => {
   console.error(`✓ Vikunja MCP server listening on port ${PORT}`);

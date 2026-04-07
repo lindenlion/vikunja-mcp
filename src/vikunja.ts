@@ -154,7 +154,8 @@ export class VikunjaClient {
 
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`Vikunja API ${method} ${path} → ${res.status}: ${text}`);
+      console.error(`Vikunja API ${method} ${path} → ${res.status}: ${text}`);
+      throw new Error(`Vikunja API request failed: ${res.status}`);
     }
 
     // DELETE sometimes returns 204 with no body

@@ -2,7 +2,7 @@
 
 All notable changes to vikunja-mcp are documented here.
 
-## [1.2.0] — Unreleased
+## [1.2.0] — 2026-04-07
 
 ### Added
 - **`get_calendar_events` tool** — reads events from any number of local
@@ -18,6 +18,21 @@ All notable changes to vikunja-mcp are documented here.
   remote iCal subscriptions. `webcal://` is automatically converted to
   `https://`. Both vars are optional; calendar features are silently
   disabled when neither is set.
+
+### Security
+- **Removed unauthenticated `/calendar.ics` HTTP endpoint** — it exposed
+  all tasks without auth. Use `get_calendar` or `get_calendar_events` tools
+  instead.
+- **Constant-time token comparison** — the `MCP_AUTH_TOKEN` check now uses
+  `crypto.timingSafeEqual` to prevent timing-based token enumeration.
+- **Path traversal protection** — `CALENDAR_ICS_FILES` paths are resolved
+  and validated before being passed to the iCal parser.
+- **SSRF protection** — `CALENDAR_ICS_URLS` entries are validated: only
+  `https://` is allowed, and private/loopback IP ranges are blocked.
+- **Error message hardening** — Vikunja API error bodies are now logged
+  server-side only; clients receive only the HTTP status code.
+- **Filter length cap** — `filter` parameters on `list_tasks`,
+  `create_filter`, and `update_filter` are capped at 500 characters.
 
 ## [1.1.0] — 2026-04-06
 

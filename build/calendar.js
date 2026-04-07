@@ -7,6 +7,7 @@
  *   CALENDAR_ICS_URLS  – comma-separated URLs (http/https/webcal)
  */
 import * as nodeIcal from "node-ical";
+import { resolve } from "path";
 // ── Helpers ────────────────────────────────────────────────────────────
 function resolveText(val) {
     if (!val)
@@ -17,6 +18,31 @@ function resolveText(val) {
 }
 function normalizeUrl(url) {
     return url.replace(/^webcal:\/\//i, "https://");
+}
+function validateFilePath(src) {
+    const resolved = resolve(src);
+    // Reject paths that look like they escaped via symlink tricks or were not absolute
+    if (resolved.includes("\0"))
+        throw new Error(`Invalid calendar file path: ${src}`);
+    return resolved;
+}
+const PRIVATE_IP_RE = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|::1|0\.0\.0\.0)/i;
+function validateUrl(src) {
+    const normalized = normalizeUrl(src);
+    let parsed;
+    try {
+        parsed = new URL(normalized);
+    }
+    catch {
+        throw new Error(`Invalid calendar URL: ${src}`);
+    }
+    if (parsed.protocol !== "https:") {
+        throw new Error(`Calendar URL must use https:// (got ${parsed.protocol})`);
+    }
+    if (PRIVATE_IP_RE.test(parsed.hostname)) {
+        throw new Error(`Calendar URL hostname is not allowed: ${parsed.hostname}`);
+    }
+    return normalized;
 }
 function toCalendarEvent(event, start, calendarName) {
     const end = event.end instanceof Date
@@ -38,10 +64,10 @@ function toCalendarEvent(event, start, calendarName) {
 async function loadSource(src, isFile) {
     let data;
     if (isFile) {
-        data = nodeIcal.sync.parseFile(src);
+        data = nodeIcal.sync.parseFile(validateFilePath(src));
     }
     else {
-        data = await nodeIcal.async.fromURL(normalizeUrl(src));
+        data = await nodeIcal.async.fromURL(validateUrl(src));
     }
     // Extract calendar name from VCALENDAR X-WR-CALNAME if present
     let calName = isFile
