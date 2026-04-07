@@ -6,7 +6,7 @@
  *   CALENDAR_ICS_FILES – comma-separated paths to local .ics files
  *   CALENDAR_ICS_URLS  – comma-separated URLs (http/https/webcal)
  */
-import * as nodeIcal from "node-ical";
+import nodeIcal from "node-ical";
 import { resolve } from "path";
 // ── Helpers ────────────────────────────────────────────────────────────
 function resolveText(val) {

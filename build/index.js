@@ -133,7 +133,7 @@ function formatCalendarAgenda(sources) {
 function createServer() {
     const server = new McpServer({
         name: "vikunja",
-        version: "1.2.0",
+        version: "1.2.1",
     });
     // ── list_projects ──────────────────────────────────────────────────
     server.tool("list_projects", "List all projects (lists) in Vikunja. Returns project IDs, titles, and metadata.", {}, async () => {
@@ -722,7 +722,7 @@ app.use("/mcp", (req, res, next) => {
 });
 // Health check
 app.get("/health", (_req, res) => {
-    res.json({ status: "ok", server: "vikunja-mcp", version: "1.2.0" });
+    res.json({ status: "ok", server: "vikunja-mcp", version: "1.2.1" });
 });
 // Stateless Streamable HTTP: each POST creates a fresh server + transport
 app.post("/mcp", async (req, res) => {

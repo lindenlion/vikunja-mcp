@@ -2,6 +2,15 @@
 
 All notable changes to vikunja-mcp are documented here.
 
+## [1.2.1] — 2026-04-07
+
+### Fixed
+- **Calendar file/URL loading crashed on startup** — `import * as nodeIcal`
+  only exposes named exports when importing a CommonJS module via ESM; `.sync`,
+  `.async`, and `.expandRecurringEvent` all landed on `.default` and were
+  therefore `undefined` at runtime. Changed to a default import so the full
+  API surface is available.
+
 ## [1.2.0] — 2026-04-07
 
 ### Added

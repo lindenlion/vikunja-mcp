@@ -160,7 +160,7 @@ function formatCalendarAgenda(sources: Awaited<ReturnType<typeof loadCalendars>>
 function createServer(): McpServer {
   const server = new McpServer({
     name: "vikunja",
-    version: "1.2.0",
+    version: "1.2.1",
   });
 
   // ── list_projects ──────────────────────────────────────────────────
@@ -981,7 +981,7 @@ app.use("/mcp", (req, res, next) => {
 
 // Health check
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", server: "vikunja-mcp", version: "1.2.0" });
+  res.json({ status: "ok", server: "vikunja-mcp", version: "1.2.1" });
 });
 
 // Stateless Streamable HTTP: each POST creates a fresh server + transport
